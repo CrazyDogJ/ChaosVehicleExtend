@@ -96,6 +96,7 @@ void UModularVehicleExtendComponent::UpdateStreamingLevel() const
 	Query.Radius = 1.0f;
 	const auto IsStreamingCompleted = WPS->IsStreamingCompleted(EWorldPartitionRuntimeCellState::Activated, {Query}, true);
 
+	// TODO : Velocity will accumulate if streaming level is not complete. It may happened in physics thread simulation.
 	ClusterUnionComponent->SetSimulatePhysics(IsStreamingCompleted);
 }
 
