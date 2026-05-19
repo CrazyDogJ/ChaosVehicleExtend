@@ -3,8 +3,11 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "AbilitySystemInterface.h"
 #include "GameFramework/Actor.h"
 #include "VehicleModuleBaseActor.generated.h"
+
+class UModularVehicleBaseComponent;
 
 USTRUCT(BlueprintType)
 struct FVehicleModuleAttachment
@@ -23,7 +26,7 @@ public:
 };
 
 UCLASS(BlueprintType, Blueprintable)
-class CHAOSVEHICLEEXTEND_API AVehicleModuleBaseActor : public AActor
+class CHAOSVEHICLEEXTEND_API AVehicleModuleBaseActor : public AActor, public IAbilitySystemInterface
 {
 	GENERATED_UCLASS_BODY()
 
@@ -40,6 +43,8 @@ protected:
 	
 	UFUNCTION()
 	void OnRep_AttachmentData();
+
+	virtual UAbilitySystemComponent* GetAbilitySystemComponent() const override;
 	
 	virtual void GetLifetimeReplicatedProps(TArray<class FLifetimeProperty>& OutLifetimeProps) const override;
 };

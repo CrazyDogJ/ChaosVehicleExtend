@@ -2,6 +2,7 @@
 
 #include "VehicleModuleBaseActor.h"
 
+#include "AbilitySystemBlueprintLibrary.h"
 #include "GeometryCollection/GeometryCollectionComponent.h"
 #include "Net/UnrealNetwork.h"
 
@@ -32,6 +33,16 @@ void AVehicleModuleBaseActor::OnRep_AttachmentData()
 		AttachToComponent(AttachmentData.PrimitiveComponent, AttachRules, AttachmentData.Socket);
 		RootMeshComponent->SetSimulatePhysics(true);
 	}
+}
+
+UAbilitySystemComponent* AVehicleModuleBaseActor::GetAbilitySystemComponent() const
+{
+	if (const auto AttachedActor = GetAttachParentActor())
+	{
+		return UAbilitySystemBlueprintLibrary::GetAbilitySystemComponent(AttachedActor);
+	}
+
+	return nullptr;
 }
 
 void AVehicleModuleBaseActor::GetLifetimeReplicatedProps(TArray<class FLifetimeProperty>& OutLifetimeProps) const

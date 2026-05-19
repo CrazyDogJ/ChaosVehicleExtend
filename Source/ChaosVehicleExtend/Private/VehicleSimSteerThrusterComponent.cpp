@@ -2,16 +2,68 @@
 
 #include "VehicleSimSteerThrusterComponent.h"
 
+#include "AbilitySystemBlueprintLibrary.h"
+#include "AbilitySystemComponent.h"
 #include "WaterBodyActor.h"
 #include "WaterRuntimeSettings.h"
-#include "SimModule/SimModuleTree.h"
+#include "ChaosModularVehicle/ModularVehicleBaseComponent.h"
 
 namespace Chaos
 {
-	FSteerThrusterSimModule::FSteerThrusterSimModule(const FSteerThrusterSettings& Settings, UWorld* InWorld)
+	FSteerThrusterSimModule::FSteerThrusterSimModule(const FSteerThrusterSettings& Settings, const UVehicleSimSteerThrusterComponent* InComp)
 		: TSimModuleSettings<FSteerThrusterSettings>(Settings), bIsInWater(false), SteerAngleDegrees(0)
 	{
-		World = InWorld;
+		OuterComponent = InComp;
+	}
+
+	UAbilitySystemComponent* FSteerThrusterSimModule::GetAbilitySystemComponent() const
+	{
+		if (OuterComponent && OuterComponent->GetOwner())
+		{
+			return UAbilitySystemBlueprintLibrary::GetAbilitySystemComponent(OuterComponent->GetOwner());
+		}
+
+		return nullptr;
+	}
+
+	float FSteerThrusterSimModule::GetFuelAttributeFloat() const
+	{
+		if (!OuterComponent)
+		{
+			return 0.0f;
+		}
+		
+		if (const auto ASC = GetAbilitySystemComponent())
+		{
+			bool bFound = false;
+			const auto FoundValue = ASC->GetGameplayAttributeValue(OuterComponent->FuelAttribute, bFound);
+			if (bFound)
+			{
+				return FoundValue;
+			}
+		}
+
+		return 0.0f;
+	}
+
+	bool FSteerThrusterSimModule::HasFuel() const
+	{
+		return GetFuelAttributeFloat() > 0.0f;
+	}
+
+	bool FSteerThrusterSimModule::IsEngineActivate() const
+	{
+		if (!OuterComponent)
+		{
+			return false;
+		}
+		
+		if (const auto ASC = GetAbilitySystemComponent())
+		{
+			return ASC->HasMatchingGameplayTag(OuterComponent->EngineActivateTag);
+		}
+
+		return false;
 	}
 
 	void FSteerThrusterSimModule::Simulate(float DeltaTime, const FAllInputs& Inputs,
@@ -23,7 +75,9 @@ namespace Chaos
 		const ECollisionChannel WaterChannel = GetDefault<UWaterRuntimeSettings>()->CollisionChannelForWaterTraces;
 		
 		TArray<FHitResult> HitResultsOut;
-		Chaos::Private::FGenericPhysicsInterface_Internal::SpherecastMulti(World
+		if (OuterComponent)
+		{
+			Chaos::Private::FGenericPhysicsInterface_Internal::SpherecastMulti(OuterComponent->GetWorld()
 								, Radius
 								, HitResultsOut
 								, Location
@@ -31,6 +85,7 @@ namespace Chaos
 								, WaterChannel
 								, FCollisionQueryParams::DefaultQueryParam
 								, FCollisionResponseParams::DefaultResponseParam);
+		}
 
 		for (const auto Itr : HitResultsOut)
 		{
@@ -48,7 +103,7 @@ namespace Chaos
 			bIsInWater = false;
 		}
 
-		if (bIsInWater)
+		if (bIsInWater && HasFuel() && IsEngineActivate())
 		{
 			// Inputs.
 			const auto Reverse = Inputs.GetControls().GetMagnitude(ReverseControlName);
@@ -103,7 +158,7 @@ Chaos::ISimulationModuleBase* UVehicleSimSteerThrusterComponent::CreateNewCoreMo
 	Settings.WaterCheckOffset = WaterCheckOffset;
 	Settings.CheckInWaterSphereRadius = CheckInWaterSphereRadius;
 
-	Chaos::ISimulationModuleBase* Thruster = new Chaos::FSteerThrusterSimModule(Settings, GetWorld());
+	Chaos::ISimulationModuleBase* Thruster = new Chaos::FSteerThrusterSimModule(Settings, this);
 	Thruster->SetAnimationEnabled(bAnimationEnabled);
 
 	return Thruster;

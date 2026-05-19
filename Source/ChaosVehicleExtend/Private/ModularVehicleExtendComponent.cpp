@@ -12,6 +12,11 @@ UModularVehicleExtendComponent::UModularVehicleExtendComponent()
 
 void UModularVehicleExtendComponent::RemoveVehicleModule(AVehicleModuleBaseActor* ModuleActor)
 {
+	if (!ModuleActor)
+	{
+		return;
+	}
+	
 	CurrentModules.Remove(ModuleActor);
 	
 	RemovingComponents.Add(ModuleActor->RootMeshComponent);
@@ -21,6 +26,11 @@ void UModularVehicleExtendComponent::RemoveVehicleModule(AVehicleModuleBaseActor
 
 void UModularVehicleExtendComponent::AddVehicleModule(AVehicleModuleBaseActor* ModuleActor, const FVehicleModuleAttachment& AttachmentData)
 {
+	if (!ModuleActor)
+	{
+		return;
+	}
+	
 	CurrentModules.Add(ModuleActor);
 	
 	if (IsRemovingComponents())

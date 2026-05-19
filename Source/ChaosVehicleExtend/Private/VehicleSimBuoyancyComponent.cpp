@@ -8,7 +8,7 @@
 #include "WaterSplineComponent.h"
 #include "SimModule/SimModuleTree.h"
 
-float GetWaterSplineKeyFast(FVector Location, const UWaterBodyComponent* WaterBodyComponent, TMap<const UWaterBodyComponent*, float>& OutSegmentMap)/*const*/
+float GetWaterSplineKeyFastSim(FVector Location, const UWaterBodyComponent* WaterBodyComponent, TMap<const UWaterBodyComponent*, float>& OutSegmentMap)/*const*/
 {
 	if (!OutSegmentMap.Contains(WaterBodyComponent))
 	{
@@ -168,7 +168,7 @@ namespace Chaos
 					if (WaterBody && WaterBody->GetWaterBodyType() == EWaterBodyType::River)
 					{
 						float SplineInputKey;
-						SplineInputKey = GetWaterSplineKeyFast(Itr.CenterLocation, WaterBody, Itr.SplineSegments);
+						SplineInputKey = GetWaterSplineKeyFastSim(Itr.CenterLocation, WaterBody, Itr.SplineSegments);
 						Itr.SplineInputKeys.Add(WaterBody, SplineInputKey);
 					}
 					

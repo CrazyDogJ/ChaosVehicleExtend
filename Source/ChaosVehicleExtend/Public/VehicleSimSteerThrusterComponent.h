@@ -3,11 +3,14 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "AttributeSet.h"
+#include "GameplayTagContainer.h"
 #include "ChaosModularVehicle/VehicleSimBaseComponent.h"
 #include "SimModule/SimulationModuleBase.h"
 
 #include "VehicleSimSteerThrusterComponent.generated.h"
 
+class UAbilitySystemComponent;
 class UVehicleSimSteerThrusterComponent;
 
 namespace Chaos
@@ -54,8 +57,16 @@ namespace Chaos
 	{
 	public:
 		DEFINE_CHAOSSIMTYPENAME(FSteerThrusterSimModule);
-		CHAOSVEHICLEEXTEND_API FSteerThrusterSimModule(const FSteerThrusterSettings& Settings, UWorld* InWorld);
+		CHAOSVEHICLEEXTEND_API FSteerThrusterSimModule(const FSteerThrusterSettings& Settings, const UVehicleSimSteerThrusterComponent* InComp);
 
+		UAbilitySystemComponent* GetAbilitySystemComponent() const;
+
+		float GetFuelAttributeFloat() const;
+
+		bool HasFuel() const;
+
+		bool IsEngineActivate() const;
+		
 		virtual TSharedPtr<FModuleNetData> GenerateNetData(const int32 NodeArrayIndex) const override { return nullptr; }
 
 		virtual const FString GetDebugName() const override { return TEXT("SteerThruster"); }
@@ -67,7 +78,7 @@ namespace Chaos
 		CHAOSVEHICLEEXTEND_API virtual void Animate() override;
 		
 	private:
-		UWorld* World;
+		const UVehicleSimSteerThrusterComponent* OuterComponent;
 		bool bIsInWater;
 		float SteerAngleDegrees;
 	};
@@ -115,6 +126,12 @@ public:
 
 	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = Attributes)
 	FVector WaterCheckOffset = FVector::ZeroVector;
+
+	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = Attributes)
+	FGameplayAttribute FuelAttribute;
+
+	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = Attributes)
+	FGameplayTag EngineActivateTag;
 	
 	virtual ESimModuleType GetModuleType() const override { return ESimModuleType::Thruster; }
 
