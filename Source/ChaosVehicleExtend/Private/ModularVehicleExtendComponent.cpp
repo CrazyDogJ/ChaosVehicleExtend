@@ -94,10 +94,14 @@ void UModularVehicleExtendComponent::UpdateStreamingLevel() const
 	const auto Location = GetOwner()->GetActorLocation();
 	auto Query = FWorldPartitionStreamingQuerySource(Location);
 	Query.Radius = 1.0f;
+	Query.bUseGridLoadingRange = false;
 	const auto IsStreamingCompleted = WPS->IsStreamingCompleted(EWorldPartitionRuntimeCellState::Activated, {Query}, true);
 
-	// TODO : Velocity will accumulate if streaming level is not complete. It may happened in physics thread simulation.
 	ClusterUnionComponent->SetSimulatePhysics(IsStreamingCompleted);
+	if (VehicleSimulationPT && VehicleSimulationPT->SimModuleTree)
+	{
+		VehicleSimulationPT->SimModuleTree->SetSimulationEnabled(IsStreamingCompleted);
+	}
 }
 
 void UModularVehicleExtendComponent::GetLifetimeReplicatedProps(TArray<class FLifetimeProperty>& OutLifetimeProps) const
