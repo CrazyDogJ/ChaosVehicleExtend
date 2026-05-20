@@ -29,7 +29,8 @@ public class ChaosVehicleExtend : ModuleRules
 				"Water",
 				"ChaosModularVehicleEngine",
 				"GameplayAbilities",
-				"GameplayTags"
+				"GameplayTags",
+				"GeometryCollectionEngine"
 				// ... add other public dependencies that you statically link with here ...
 			}
 			);
