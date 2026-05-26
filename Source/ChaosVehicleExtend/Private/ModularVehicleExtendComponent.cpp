@@ -129,6 +129,15 @@ void UModularVehicleExtendComponent::TickComponent(float DeltaTime, enum ELevelT
 
 	UpdateAttachment(DeltaTime);
 	UpdateStreamingLevel();
+
+	// Reset inputs.
+	if (!IsLocallyControlled())
+	{
+		if (const auto PT = VehicleSimulationPT.Get())
+		{
+			PT->VehicleInputs.Container = FModuleInputContainer();
+		}
+	}
 }
 
 void UModularVehicleExtendComponent::CreateAssociatedSimComponents(USceneComponent* ParentComponent,
