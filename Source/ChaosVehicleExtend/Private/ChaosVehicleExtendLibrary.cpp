@@ -181,7 +181,7 @@ TMap<USceneComponent*, int> UChaosVehicleExtendLibrary::GetComponentToPhysicsObj
 	{
 		for (const auto Itr : Comp->ComponentToPhysicsObjects)
 		{
-			Result.Add(Itr.Key.ResolveObjectPtr(), Itr.Value.Guid);
+			Result.Add(Itr.Key, Itr.Value.Guid);
 		}
 	}
 

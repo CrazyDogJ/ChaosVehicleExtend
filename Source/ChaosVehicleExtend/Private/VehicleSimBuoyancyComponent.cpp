@@ -100,7 +100,8 @@ float GetWaterHeight(TArray<UWaterBodyComponent*> CurrentWaterBodyComponents, co
 				QueryFlags |= EWaterBodyQueryFlags::IncludeWaves;
 			}
 
-			FWaterBodyQueryResult QueryResult = CurrentWaterBodyComponent->QueryWaterInfoClosestToWorldLocation(Position, QueryFlags, SplineInputKey);
+			auto OutQueryResult = CurrentWaterBodyComponent->TryQueryWaterInfoClosestToWorldLocation(Position, QueryFlags, SplineInputKey);
+			FWaterBodyQueryResult QueryResult = OutQueryResult.GetValue();
 			if (QueryResult.IsInWater() && QueryResult.GetImmersionDepth() > MaxImmersionDepth)
 			{
 				check(!QueryResult.IsInExclusionVolume());

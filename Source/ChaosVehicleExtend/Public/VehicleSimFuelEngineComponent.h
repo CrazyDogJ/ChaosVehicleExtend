@@ -72,4 +72,5 @@ public:
 	FGameplayTag EngineActivateTag;
 
 	virtual Chaos::ISimulationModuleBase* CreateNewCoreModule() const override;
+	virtual void OnOutputReady(const Chaos::FSimOutputData* OutputData) override {}
 };
