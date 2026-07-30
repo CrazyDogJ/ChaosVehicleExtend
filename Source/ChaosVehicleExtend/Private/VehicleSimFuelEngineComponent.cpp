@@ -98,7 +98,10 @@ namespace Chaos
 	{
 		ThrottleValue = Inputs.GetControls().GetMagnitude(ThrottleControlName);
 		
-		EngineStarted = HasFuel() && IsEngineActivate();
+		const auto bHasFuel = HasFuel();
+		const auto bEngineActive = IsEngineActivate();
+		
+		EngineStarted = bHasFuel && bEngineActive;
 		if (!EngineStarted)
 		{
 			DriveTorque = 0.0f;
