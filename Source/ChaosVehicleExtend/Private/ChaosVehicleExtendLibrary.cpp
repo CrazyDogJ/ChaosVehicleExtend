@@ -20,7 +20,8 @@ float UChaosVehicleExtendLibrary::GetModularVehicleSpeed(const UModularVehicleBa
 
 void UChaosVehicleExtendLibrary::SetModularVehicleCOM(const UModularVehicleBaseComponent* Comp, const FVector& COM)
 {
-	if (Comp)
+	// 修复：物理组件和外部粒子在注册、拆卸期间都可能不存在。
+	if (Comp && Comp->ClusterUnionComponent)
 	{
 		if (const auto PhysicsObject = Comp->ClusterUnionComponent->GetPhysicsObjectByName(""))
 		{
@@ -29,7 +30,7 @@ void UChaosVehicleExtendLibrary::SetModularVehicleCOM(const UModularVehicleBaseC
 				if (const auto ClusterUnionPP = static_cast<Chaos::FClusterUnionPhysicsProxy*>(PP))
 				{
 					const auto ParticleEx = ClusterUnionPP->GetParticle_External();
-					ParticleEx->SetCenterOfMass(COM);
+					if (ParticleEx) ParticleEx->SetCenterOfMass(COM);
 
 					if (const auto Solver = ClusterUnionPP->GetSolver<Chaos::FPhysicsSolverBase>())
 					{
@@ -58,7 +59,8 @@ float UChaosVehicleExtendLibrary::GetModularVehicleRPM(const UModularVehicleBase
 			for (const auto Itr : OutPut->SimTreeOutputData)
 			{
 				// if there is more than one engine then the last one will inform us of the engine RPM
-				if (const Chaos::FEngineOutputData* Engine = static_cast<Chaos::FEngineOutputData*>(Itr))
+				// 修复：同一输出数组还包含车轮等模块，转换前检查 Chaos 类型。
+				if (const auto* Engine = Itr ? Itr->Cast<Chaos::FEngineOutputData>() : nullptr)
 				{
 					return Engine->RPM;
 				}
@@ -78,7 +80,8 @@ float UChaosVehicleExtendLibrary::GetModularVehicleTorque(const UModularVehicleB
 			for (const auto Itr : OutPut->SimTreeOutputData)
 			{
 				// if there is more than one engine then the last one will inform us of the engine RPM
-				if (const Chaos::FEngineOutputData* Engine = static_cast<Chaos::FEngineOutputData*>(Itr))
+				// 修复：同一输出数组还包含车轮等模块，转换前检查 Chaos 类型。
+				if (const auto* Engine = Itr ? Itr->Cast<Chaos::FEngineOutputData>() : nullptr)
 				{
 					return Engine->Torque;
 				}
@@ -98,9 +101,10 @@ float UChaosVehicleExtendLibrary::GetModularVehicleThrottle(const UModularVehicl
 			for (const auto Itr : OutPut->SimTreeOutputData)
 			{
 				// if there is more than one engine then the last one will inform us of the engine RPM
-				if (const Chaos::FFuelEngineOutputData* Engine = static_cast<Chaos::FFuelEngineOutputData*>(Itr))
+				// 修复：只有带燃料输出标记的引擎才包含油门字段。
+				if (Itr && Itr->IsSimType(Chaos::FFuelEngineOutputData::FuelOutputType()))
 				{
-					return Engine->ThrottleValue;
+					return static_cast<const Chaos::FFuelEngineOutputData*>(Itr)->ThrottleValue;
 				}
 			}
 		}
@@ -120,7 +124,10 @@ void UChaosVehicleExtendLibrary::SetWheelRepSettings(USceneComponent* WheelComp,
 	{
 		const auto FoundGuid = ComponentData->Guid;
 
+		// 修复：物理状态在车辆拆卸期间可能先于组件映射释放。
+		if (!Settings.VehicleBaseComponent->VehicleSimulationPT) return;
 		TUniquePtr<Chaos::FSimModuleTree>& SimModuleTree = Settings.VehicleBaseComponent->VehicleSimulationPT->AccessSimComponentTree();
+		if (!SimModuleTree) return;
 		for (int I = 0; I < SimModuleTree->GetNumNodes(); I++)
 		{
 			if (auto SimModule = SimModuleTree->AccessSimModule(I))
@@ -145,7 +152,10 @@ void UChaosVehicleExtendLibrary::SetWheelRepSettings(USceneComponent* WheelComp,
 void UChaosVehicleExtendLibrary::SetWheelRepSettingsUpdate(USceneComponent* WheelComp, FWheelRepSettings Settings,
 	FSimTreeUpdatesHandle Handle)
 {
-	const auto NewModules = Handle.TreeUpdatesOut.GetNewModules();
+	// 修复：延迟执行的蓝图不能再解引用创建事件中的模拟模块。
+	const auto Active = Handle.ActiveUpdates.Pin();
+	if (!Active) return;
+	const auto NewModules = Active->GetNewModules();
 	
 	if (!Settings.VehicleBaseComponent)
 	{
@@ -157,7 +167,7 @@ void UChaosVehicleExtendLibrary::SetWheelRepSettingsUpdate(USceneComponent* Whee
 		const auto FoundGuid = ComponentData->Guid;
 		for (const auto Itr : NewModules)
 		{
-			if (Itr.NewSimModule->GetGuid() == FoundGuid)
+			if (Itr.NewSimModule && Itr.NewSimModule->GetGuid() == FoundGuid)
 			{
 				if (const auto WheelSimModule = Itr.NewSimModule->Cast<Chaos::FWheelSimModule>())
 				{

@@ -10,11 +10,15 @@
 #include "VehicleSimFuelEngineComponent.generated.h"
 
 class UVehicleSimFuelEngineComponent;
+struct FVehicleEngineRuntimeState;
 
 namespace Chaos
 {
 	struct FFuelEngineOutputData : public FEngineOutputData
 	{
+		// 修复：区分普通引擎输出和含油门字段的派生输出。
+		static FName FuelOutputType() { static const FName Type(TEXT("FuelEngineOutput")); return Type; }
+		FFuelEngineOutputData() { AddType(FuelOutputType()); }
 		virtual FSimOutputData* MakeNewData() override { return FFuelEngineOutputData::MakeNew(); }
 		static FSimOutputData* MakeNew() { return new FFuelEngineOutputData(); }
 		
@@ -53,7 +57,9 @@ namespace Chaos
 		float GetThrottleValue() const { return ThrottleValue; }
 	protected:
 		float ThrottleValue;
-		const UVehicleSimFuelEngineComponent* Owner;
+		// 修复：模块的生命周期与所属 UObject 独立。
+		TWeakObjectPtr<const UVehicleSimFuelEngineComponent> Owner;
+		TWeakPtr<FVehicleEngineRuntimeState, ESPMode::ThreadSafe> EngineState;
 	};
 }
 
@@ -64,6 +70,15 @@ class CHAOSVEHICLEEXTEND_API UVehicleSimFuelEngineComponent : public UVehicleSim
 
 public:
 	UVehicleSimFuelEngineComponent();
+	TSharedPtr<FVehicleEngineRuntimeState, ESPMode::ThreadSafe> GetEngineState() const;
+
+protected:
+	// 修复：组件注销时物理端的弱快照随即失效。
+	virtual void OnUnregister() override;
+	virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
+	mutable TSharedPtr<FVehicleEngineRuntimeState, ESPMode::ThreadSafe> EngineState;
+
+public:
 
 	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = Attributes)
 	FGameplayAttribute FuelAttribute;

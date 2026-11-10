@@ -16,6 +16,8 @@ float GetWaterSplineKeyFastSim(FVector Location, const UWaterBodyComponent* Wate
 	}
 
 	const UWaterSplineComponent* WaterSpline = WaterBodyComponent->GetWaterSpline();
+	// 修复：流送期间河流组件可能没有样条。
+	if (!WaterSpline) return 0.0f;
 	const FVector LocalLocation = WaterBodyComponent->GetComponentTransform().InverseTransformPosition(Location);
 	const FInterpCurveVector& InterpCurve = WaterSpline->GetSplinePointsPosition();
 	float& Segment = OutSegmentMap[WaterBodyComponent];
@@ -70,7 +72,7 @@ float GetWaterSplineKeyFastSim(FVector Location, const UWaterBodyComponent* Wate
 	return 0.0f;
 }
 
-float GetWaterHeight(TArray<UWaterBodyComponent*> CurrentWaterBodyComponents, const FVector& Position,
+float GetWaterHeight(const TArray<TWeakObjectPtr<UWaterBodyComponent>>& CurrentWaterBodyComponents, const FVector& Position,
 	const TMap<const UWaterBodyComponent*, float>& SplineKeyMap, float DefaultHeight,
 	UWaterBodyComponent*& OutWaterBodyComponent, float& OutWaterDepth, FVector& OutWaterPlaneLocation,
 	FVector& OutWaterPlaneNormal, FVector& OutWaterSurfacePosition, FVector& OutWaterVelocity, int32& OutWaterBodyIdx,
@@ -83,9 +85,11 @@ float GetWaterHeight(TArray<UWaterBodyComponent*> CurrentWaterBodyComponents, co
 	OutWaterPlaneNormal = FVector::UpVector;
 
 	float MaxImmersionDepth = -1.f;
-	for (UWaterBodyComponent* CurrentWaterBodyComponent : CurrentWaterBodyComponents)
+	for (const auto& WeakBody : CurrentWaterBodyComponents)
 	{
-		if (CurrentWaterBodyComponent)
+		bool bCanPin = false;
+		const auto Body = WeakBody.TryPin(bCanPin);
+		if (auto* CurrentWaterBodyComponent = Body.Get())
 		{
 			const float SplineInputKey = SplineKeyMap.FindRef(CurrentWaterBodyComponent);
 
@@ -101,6 +105,8 @@ float GetWaterHeight(TArray<UWaterBodyComponent*> CurrentWaterBodyComponents, co
 			}
 
 			auto OutQueryResult = CurrentWaterBodyComponent->TryQueryWaterInfoClosestToWorldLocation(Position, QueryFlags, SplineInputKey);
+			// 修复：水体查询返回失败时不可读取结果。
+			if (!OutQueryResult.HasValue()) continue;
 			FWaterBodyQueryResult QueryResult = OutQueryResult.GetValue();
 			if (QueryResult.IsInWater() && QueryResult.GetImmersionDepth() > MaxImmersionDepth)
 			{
@@ -130,24 +136,28 @@ namespace Chaos
 	{
 		Pontoons = Settings.Pontoons;
 		World = InWorld;
+		WaterChannel = GetDefault<UWaterRuntimeSettings>()->CollisionChannelForWaterTraces;
 	}
 
 	void FBuoyancySimModule::UpdateCurrentWaterBodies(const FAllInputs& Inputs)
 	{
 		CurrentWaterBodies.Empty();
-		const ECollisionChannel WaterChannel = GetDefault<UWaterRuntimeSettings>()->CollisionChannelForWaterTraces;
-		
-		if (!World)
+		bool bCanPin = false;
+		const auto PinnedWorld = World.TryPin(bCanPin);
+		if (!PinnedWorld.IsValid())
 		{
 			return;
 		}
 		
 		for (auto& Itr : Pontoons)
 		{
+			// 修复：浮筒不跨帧保留流送水体的裸指针键，防止缓存随路程增长。
+			Itr.SplineSegments.Reset();
+			Itr.SplineInputKeys.Reset();
 			Itr.CenterLocation = Inputs.VehicleWorldTransform.TransformPosition(Itr.RelativeLocation);
 			
 			TArray<FHitResult> HitResultsOut;
-			Chaos::Private::FGenericPhysicsInterface_Internal::SpherecastMulti(World
+			Chaos::Private::FGenericPhysicsInterface_Internal::SpherecastMulti(PinnedWorld.Get()
 									, Itr.Radius
 									, HitResultsOut
 									, Itr.CenterLocation
@@ -184,14 +194,15 @@ namespace Chaos
 		for (auto& Pontoon : Pontoons)
 		{
 			const FVector PontoonBottom = Pontoon.CenterLocation - FVector(0, 0, Pontoon.Radius);
-			UWaterBodyComponent* TempWaterBodyComponent = Pontoon.CurrentWaterBodyComponent;
+			UWaterBodyComponent* TempWaterBodyComponent = nullptr;
 			/*Pass in large negative default value so we don't accidentally assume we're in water when we're not.*/
 			Pontoon.WaterHeight = GetWaterHeight(CurrentWaterBodies, PontoonBottom - FVector::UpVector * 100.f,
 				Pontoon.SplineInputKeys, -100000.f, TempWaterBodyComponent, Pontoon.WaterDepth,
 				Pontoon.WaterPlaneLocation, Pontoon.WaterPlaneNormal, Pontoon.WaterSurfacePosition,
 				Pontoon.WaterVelocity, Pontoon.WaterBodyIndex, false);
 		
-			Pontoon.CurrentWaterBodyComponent = TempWaterBodyComponent;
+			// 修复：碰撞目标仅用于本步采样，模拟模块不跨帧持有 UObject 地址。
+			Pontoon.CurrentWaterBodyComponent = nullptr;
 
 			const float ImmersionDepth = Pontoon.WaterHeight - PontoonBottom.Z;
 			/*check if the pontoon is currently in water*/

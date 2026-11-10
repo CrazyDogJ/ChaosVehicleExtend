@@ -1,6 +1,7 @@
 ﻿// Fill out your copyright notice in the Description page of Project Settings.
 
 #include "VehicleSimSteerThrusterComponent.h"
+#include "VehicleEngineRuntimeState.h"
 
 #include "AbilitySystemBlueprintLibrary.h"
 #include "AbilitySystemComponent.h"
@@ -14,11 +15,14 @@ namespace Chaos
 		: TSimModuleSettings<FSteerThrusterSettings>(Settings), bIsInWater(false), SteerAngleDegrees(0)
 	{
 		OuterComponent = InComp;
+		if (InComp) EngineState = InComp->GetEngineState();
+		SimulationWorld = InComp ? InComp->GetWorld() : nullptr;
+		WaterChannel = GetDefault<UWaterRuntimeSettings>()->CollisionChannelForWaterTraces;
 	}
 
 	UAbilitySystemComponent* FSteerThrusterSimModule::GetAbilitySystemComponent() const
 	{
-		if (OuterComponent && OuterComponent->GetOwner())
+		if (IsInGameThread() && OuterComponent.IsValid() && OuterComponent->GetOwner())
 		{
 			return UAbilitySystemBlueprintLibrary::GetAbilitySystemComponent(OuterComponent->GetOwner());
 		}
@@ -28,22 +32,8 @@ namespace Chaos
 
 	float FSteerThrusterSimModule::GetFuelAttributeFloat() const
 	{
-		if (!OuterComponent)
-		{
-			return 0.0f;
-		}
-		
-		if (const auto ASC = GetAbilitySystemComponent())
-		{
-			bool bFound = false;
-			const auto FoundValue = ASC->GetGameplayAttributeValue(OuterComponent->FuelAttribute, bFound);
-			if (bFound)
-			{
-				return FoundValue;
-			}
-		}
-
-		return 0.0f;
+		const auto State = EngineState.Pin();
+		return State ? State->Fuel.Load() : 0.0f;
 	}
 
 	bool FSteerThrusterSimModule::HasFuel() const
@@ -53,17 +43,8 @@ namespace Chaos
 
 	bool FSteerThrusterSimModule::IsEngineActivate() const
 	{
-		if (!OuterComponent)
-		{
-			return false;
-		}
-		
-		if (const auto ASC = GetAbilitySystemComponent())
-		{
-			return ASC->HasMatchingGameplayTag(OuterComponent->EngineActivateTag);
-		}
-
-		return false;
+		const auto State = EngineState.Pin();
+		return State && State->bActive.Load();
 	}
 
 	void FSteerThrusterSimModule::Simulate(float DeltaTime, const FAllInputs& Inputs,
@@ -72,12 +53,15 @@ namespace Chaos
 		const auto Radius = Setup().CheckInWaterSphereRadius;
 		const auto Offset = Setup().WaterCheckOffset;
 		const auto Location = Inputs.VehicleWorldTransform.TransformPosition(Offset);
-		const ECollisionChannel WaterChannel = GetDefault<UWaterRuntimeSettings>()->CollisionChannelForWaterTraces;
+		// 修复：在 GC 或世界销毁期间跳过查询，当前物理步内保持世界存活。
+		bool bCanPin = false;
+		const auto World = SimulationWorld.TryPin(bCanPin);
+		bIsInWater = false;
 		
 		TArray<FHitResult> HitResultsOut;
-		if (OuterComponent)
+		if (World.IsValid())
 		{
-			Chaos::Private::FGenericPhysicsInterface_Internal::SpherecastMulti(OuterComponent->GetWorld()
+			Chaos::Private::FGenericPhysicsInterface_Internal::SpherecastMulti(World.Get()
 								, Radius
 								, HitResultsOut
 								, Location
@@ -103,7 +87,8 @@ namespace Chaos
 			bIsInWater = false;
 		}
 
-		if (bIsInWater && HasFuel() && IsEngineActivate())
+		// 修复：拆卸过程中输入可能已失效。
+		if (Inputs.ControlInputs && bIsInWater && HasFuel() && IsEngineActivate())
 		{
 			// Inputs.
 			const auto Reverse = Inputs.GetControls().GetMagnitude(ReverseControlName);
@@ -141,6 +126,27 @@ UVehicleSimSteerThrusterComponent::UVehicleSimSteerThrusterComponent()
 	,SteerForceOffset(FVector::ZeroVector)
 	,SteerMaxSpeed(125.0f)
 {
+	PrimaryComponentTick.bCanEverTick = true;
+	PrimaryComponentTick.TickGroup = TG_PrePhysics;
+}
+
+TSharedPtr<FVehicleEngineRuntimeState, ESPMode::ThreadSafe> UVehicleSimSteerThrusterComponent::GetEngineState() const
+{
+	if (!EngineState) EngineState = MakeShared<FVehicleEngineRuntimeState, ESPMode::ThreadSafe>();
+	EngineState->Refresh(GetOwner(), FuelAttribute, EngineActivateTag);
+	return EngineState;
+}
+
+void UVehicleSimSteerThrusterComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
+{
+	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
+	if (EngineState) EngineState->Refresh(GetOwner(), FuelAttribute, EngineActivateTag);
+}
+
+void UVehicleSimSteerThrusterComponent::OnUnregister()
+{
+	EngineState.Reset();
+	Super::OnUnregister();
 }
 
 Chaos::ISimulationModuleBase* UVehicleSimSteerThrusterComponent::CreateNewCoreModule() const

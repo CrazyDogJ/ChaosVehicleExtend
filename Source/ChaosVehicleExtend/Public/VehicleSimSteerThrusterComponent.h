@@ -12,6 +12,7 @@
 
 class UAbilitySystemComponent;
 class UVehicleSimSteerThrusterComponent;
+struct FVehicleEngineRuntimeState;
 
 namespace Chaos
 {
@@ -78,7 +79,11 @@ namespace Chaos
 		CHAOSVEHICLEEXTEND_API virtual void Animate() override;
 		
 	private:
-		const UVehicleSimSteerThrusterComponent* OuterComponent;
+		// 修复：模块的生命周期与所属 UObject 独立。
+		TWeakObjectPtr<const UVehicleSimSteerThrusterComponent> OuterComponent;
+		TWeakPtr<FVehicleEngineRuntimeState, ESPMode::ThreadSafe> EngineState;
+		TWeakObjectPtr<UWorld> SimulationWorld;
+		ECollisionChannel WaterChannel = ECC_WorldStatic;
 		bool bIsInWater;
 		float SteerAngleDegrees;
 	};
@@ -93,6 +98,15 @@ class CHAOSVEHICLEEXTEND_API UVehicleSimSteerThrusterComponent : public UVehicle
 
 public:
 	UVehicleSimSteerThrusterComponent();
+	TSharedPtr<FVehicleEngineRuntimeState, ESPMode::ThreadSafe> GetEngineState() const;
+
+protected:
+	// 修复：组件注销时物理端的弱快照随即失效。
+	virtual void OnUnregister() override;
+	virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
+	mutable TSharedPtr<FVehicleEngineRuntimeState, ESPMode::ThreadSafe> EngineState;
+
+public:
 
 	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = Attributes)
 	float MaxThrustForce;

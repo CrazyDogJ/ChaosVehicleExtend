@@ -14,6 +14,8 @@ struct FSimTreeUpdatesHandle
 	GENERATED_BODY()
 
 	Chaos::FSimTreeUpdates TreeUpdatesOut;
+	// 修复：更新中的模块指针只在同步广播期间有效，蓝图保存的副本可能过期。
+	TWeakPtr<const Chaos::FSimTreeUpdates> ActiveUpdates;
 };
 
 USTRUCT(BlueprintType)
@@ -87,6 +89,7 @@ public:
 	void RemoveAttachment(AActor* Actor, bool bAttach = true);
 	
 protected:
+	void BroadcastSimComponentCreated(USceneComponent* Component, int32 TransformIndex, const Chaos::FSimTreeUpdates& Updates);
 	void UpdateAttachment(const float DeltaSecond);
 
 	void UpdateStreamingLevel() const;

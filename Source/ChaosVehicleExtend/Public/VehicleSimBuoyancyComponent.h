@@ -51,8 +51,11 @@ namespace Chaos
 		CHAOSVEHICLEEXTEND_API virtual void Simulate(float DeltaTime, const FAllInputs& Inputs, FSimModuleTree& VehicleModuleSystem) override;
 		
 	private:
-		UWorld* World;
-		TArray<UWaterBodyComponent*> CurrentWaterBodies;
+		// 修复：物理模块不能长期保存随关卡销毁的世界裸指针。
+		TWeakObjectPtr<UWorld> World;
+		ECollisionChannel WaterChannel = ECC_WorldStatic;
+		// 修复：只在本次水面查询期间固定水体对象。
+		TArray<TWeakObjectPtr<UWaterBodyComponent>> CurrentWaterBodies;
 		TArray<FSphericalPontoon> Pontoons;
 	};
 

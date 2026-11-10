@@ -12,7 +12,8 @@ UModularVehicleExtendComponent::UModularVehicleExtendComponent()
 
 void UModularVehicleExtendComponent::RemoveVehicleModule(AVehicleModuleBaseActor* ModuleActor)
 {
-	if (!ModuleActor)
+	// 修复：装卸请求可能早于物理初始化，或在模块销毁后到达。
+	if (!IsValid(ModuleActor) || !IsValid(ModuleActor->RootMeshComponent) || !ClusterUnionComponent)
 	{
 		return;
 	}
@@ -26,7 +27,8 @@ void UModularVehicleExtendComponent::RemoveVehicleModule(AVehicleModuleBaseActor
 
 void UModularVehicleExtendComponent::AddVehicleModule(AVehicleModuleBaseActor* ModuleActor, const FVehicleModuleAttachment& AttachmentData)
 {
-	if (!ModuleActor)
+	// 修复：装卸请求可能早于物理初始化，或在模块销毁后到达。
+	if (!IsValid(ModuleActor) || !IsValid(ModuleActor->RootMeshComponent) || !ClusterUnionComponent)
 	{
 		return;
 	}
@@ -80,9 +82,11 @@ void UModularVehicleExtendComponent::RemoveAttachment(AActor* Actor, const bool 
 
 void UModularVehicleExtendComponent::UpdateAttachment(const float DeltaSecond)
 {
-	for (const auto Seat : VehicleSeats)
+	// 修复：复制未解析的座位成员可能为空，移动 Actor 的回调也可能修改座位数组。
+	const auto Seats = VehicleSeats;
+	for (const auto& Seat : Seats)
 	{
-		if (Seat.Actor->GetAttachParentActor() == GetOwner() && Seat.Primitive)
+		if (IsValid(Seat.Actor) && IsValid(Seat.Primitive) && Seat.Actor->GetAttachParentActor() == GetOwner())
 		{
 			FVector CompVelocity = Seat.Primitive->GetComponentVelocity();
 			const auto SocketTransform = Seat.Primitive->GetSocketTransform(Seat.Socket);
@@ -96,7 +100,7 @@ void UModularVehicleExtendComponent::UpdateAttachment(const float DeltaSecond)
 void UModularVehicleExtendComponent::UpdateStreamingLevel() const
 {
 	const auto WPS = GetWorld()->GetSubsystem<UWorldPartitionSubsystem>();
-	if (!WPS)
+	if (!WPS || !ClusterUnionComponent || !GetOwner())
 	{
 		return;
 	}
@@ -140,13 +144,21 @@ void UModularVehicleExtendComponent::TickComponent(float DeltaTime, enum ELevelT
 	}
 }
 
+void UModularVehicleExtendComponent::BroadcastSimComponentCreated(USceneComponent* Component, int32 TransformIndex, const Chaos::FSimTreeUpdates& Updates)
+{
+	// 修复：广播返回后自动令蓝图拿到的更新句柄失效。
+	const auto Active = MakeShared<Chaos::FSimTreeUpdates>(Updates);
+	FSimTreeUpdatesHandle Handle{Updates, Active};
+	OnSimComponentCreated.Broadcast(Component, TransformIndex, Handle);
+}
+
 void UModularVehicleExtendComponent::CreateAssociatedSimComponents(USceneComponent* ParentComponent,
                                                                    USceneComponent* AttachedComponent, int ParentIndex, int TransformIndex, Chaos::FSimTreeUpdates& TreeUpdatesOut)
 {
 	Super::CreateAssociatedSimComponents(ParentComponent, AttachedComponent, ParentIndex, TransformIndex,
 	                                     TreeUpdatesOut);
 
-	OnSimComponentCreated.Broadcast(AttachedComponent, TransformIndex, FSimTreeUpdatesHandle(TreeUpdatesOut));
+	BroadcastSimComponentCreated(AttachedComponent, TransformIndex, TreeUpdatesOut);
 }
 
 void UModularVehicleExtendComponent::CreateIndependentSimComponents(USceneComponent* RootComponent,
@@ -155,7 +167,7 @@ void UModularVehicleExtendComponent::CreateIndependentSimComponents(USceneCompon
 	Super::CreateIndependentSimComponents(RootComponent, AttachedComponent, ParentIndex, TransformIndex,
 	                                      TreeUpdatesOut);
 	
-	OnSimComponentCreated.Broadcast(AttachedComponent, TransformIndex, FSimTreeUpdatesHandle(TreeUpdatesOut));
+	BroadcastSimComponentCreated(AttachedComponent, TransformIndex, TreeUpdatesOut);
 }
 
 void UModularVehicleExtendComponent::AddComponentToSimulationImpl(UPrimitiveComponent* Component,
@@ -185,15 +197,17 @@ void UModularVehicleExtendComponent::RemoveComponentFromSimulationImpl(UPrimitiv
 	
 	if (!IsRemovingComponents() && CachedAddingComponents.Num() > 0)
 	{
-		for (const auto Comp : CachedAddingComponents)
+		// 修复：添加模块可同步触发更新事件，先取走当前批次。
+		auto Pending = MoveTemp(CachedAddingComponents);
+		for (const auto& Comp : Pending)
 		{
+			if (!IsValid(Comp.Key) || !ClusterUnionComponent) continue;
 			if (const auto VehicleModuleActor = Cast<AVehicleModuleBaseActor>(Comp.Key->GetOwner()))
 			{
 				VehicleModuleActor->SetAttachmentData(Comp.Value);
 			}
 			ClusterUnionComponent->AddComponentToCluster(Comp.Key, {0});
 		}
-		CachedAddingComponents.Empty();
 	}
 	
 	OnComponentRemovedEvent.Broadcast(InComponent);

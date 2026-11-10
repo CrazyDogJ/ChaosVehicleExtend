@@ -14,7 +14,8 @@ namespace Chaos
 	{
 		ISimulationModuleBase::Simulate(DeltaTime, Inputs, VehicleModuleSystem);
 
-		SteeringInput = Inputs.ControlInputs->GetMagnitude(SteeringControlName);
+		// 修复：输入容器尚未建立时以零转向模拟。
+		SteeringInput = Inputs.ControlInputs ? Inputs.ControlInputs->GetMagnitude(SteeringControlName) : 0.0f;
 	}
 
 	void FSteerWheelSimModule::Animate()
@@ -23,7 +24,8 @@ namespace Chaos
 
 		const auto Angle = Setup().Angle * SteeringInput;
 
-		FRotator Rotation;
+		// 修复：未使用的旋转轴也参与四元数运算，必须初始化。
+		FRotator Rotation = FRotator::ZeroRotator;
 	
 		switch (Setup().Axis)
 		{

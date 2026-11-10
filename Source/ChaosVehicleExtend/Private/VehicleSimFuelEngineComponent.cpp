@@ -1,6 +1,7 @@
 ﻿// Fill out your copyright notice in the Description page of Project Settings.
 
 #include "VehicleSimFuelEngineComponent.h"
+#include "VehicleEngineRuntimeState.h"
 
 #include "AbilitySystemBlueprintLibrary.h"
 #include "AbilitySystemComponent.h"
@@ -26,6 +27,8 @@ namespace Chaos
 
 	void FFuelEngineOutputData::Lerp(const FSimOutputData& InCurrent, const FSimOutputData& InNext, float Alpha)
 	{
+		// 修复：模块替换时相邻帧不一定都是燃料引擎输出。
+		if (!InCurrent.IsSimType(FuelOutputType()) || !InNext.IsSimType(FuelOutputType())) return;
 		FEngineOutputData::Lerp(InCurrent, InNext, Alpha);
 		
 		const FFuelEngineOutputData& Current = static_cast<const FFuelEngineOutputData&>(InCurrent);
@@ -42,11 +45,12 @@ namespace Chaos
 		: FEngineSimModule(Settings), ThrottleValue(0)
 	{
 		Owner = InOwner;
+		if (InOwner) EngineState = InOwner->GetEngineState();
 	}
 
 	UAbilitySystemComponent* FFuelEngineSimModule::GetAbilitySystemComponent() const
 	{
-		if (Owner && Owner->GetOwner())
+		if (IsInGameThread() && Owner.IsValid() && Owner->GetOwner())
 		{
 			return UAbilitySystemBlueprintLibrary::GetAbilitySystemComponent(Owner->GetOwner());
 		}
@@ -56,22 +60,8 @@ namespace Chaos
 
 	float FFuelEngineSimModule::GetFuelAttributeFloat() const
 	{
-		if (!Owner)
-		{
-			return 0.0f;
-		}
-		
-		if (const auto ASC = GetAbilitySystemComponent())
-		{
-			bool bFound = false;
-			const auto FoundValue = ASC->GetGameplayAttributeValue(Owner->FuelAttribute, bFound);
-			if (bFound)
-			{
-				return FoundValue;
-			}
-		}
-
-		return 0.0f;
+		const auto State = EngineState.Pin();
+		return State ? State->Fuel.Load() : 0.0f;
 	}
 
 	bool FFuelEngineSimModule::HasFuel() const
@@ -81,21 +71,14 @@ namespace Chaos
 
 	bool FFuelEngineSimModule::IsEngineActivate() const
 	{
-		if (!Owner)
-		{
-			return false;
-		}
-		
-		if (const auto ASC = GetAbilitySystemComponent())
-		{
-			return ASC->HasMatchingGameplayTag(Owner->EngineActivateTag);
-		}
-
-		return false;
+		const auto State = EngineState.Pin();
+		return State && State->bActive.Load();
 	}
 
 	void FFuelEngineSimModule::Simulate(float DeltaTime, const FAllInputs& Inputs, FSimModuleTree& VehicleModuleSystem)
 	{
+		// 修复：车辆拆卸期间输入接口可能已清空。
+		if (!Inputs.ControlInputs) { ThrottleValue = 0.0f; return; }
 		ThrottleValue = Inputs.GetControls().GetMagnitude(ThrottleControlName);
 		
 		const auto bHasFuel = HasFuel();
@@ -120,6 +103,27 @@ namespace Chaos
 UVehicleSimFuelEngineComponent::UVehicleSimFuelEngineComponent()
 	: Super()
 {
+	PrimaryComponentTick.bCanEverTick = true;
+	PrimaryComponentTick.TickGroup = TG_PrePhysics;
+}
+
+TSharedPtr<FVehicleEngineRuntimeState, ESPMode::ThreadSafe> UVehicleSimFuelEngineComponent::GetEngineState() const
+{
+	if (!EngineState) EngineState = MakeShared<FVehicleEngineRuntimeState, ESPMode::ThreadSafe>();
+	EngineState->Refresh(GetOwner(), FuelAttribute, EngineActivateTag);
+	return EngineState;
+}
+
+void UVehicleSimFuelEngineComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
+{
+	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
+	if (EngineState) EngineState->Refresh(GetOwner(), FuelAttribute, EngineActivateTag);
+}
+
+void UVehicleSimFuelEngineComponent::OnUnregister()
+{
+	EngineState.Reset();
+	Super::OnUnregister();
 }
 
 Chaos::ISimulationModuleBase* UVehicleSimFuelEngineComponent::CreateNewCoreModule() const
@@ -128,13 +132,15 @@ Chaos::ISimulationModuleBase* UVehicleSimFuelEngineComponent::CreateNewCoreModul
 
 	Settings.MaxTorque = Chaos::TorqueMToCm(MaxTorque);
 
-	float NumSamples = 20;
-	for (float X = 0; X <= MaxRPM; X += (MaxRPM / NumSamples))
+	// 修复：MaxRPM 为零时浮点步长也为零，旧循环会无限增长曲线数组。
+	constexpr int32 NumSamples = 20;
+	const auto* Curve = TorqueCurve.GetRichCurveConst();
+	float MinVal = 0.0f, MaxVal = 0.0f;
+	Curve->GetValueRange(MinVal, MaxVal);
+	for (int32 Sample = 0; Sample <= NumSamples; ++Sample)
 	{
-		float MinVal = 0.f, MaxVal = 0.f;
-		TorqueCurve.GetRichCurveConst()->GetValueRange(MinVal, MaxVal);
-		float Y = this->TorqueCurve.GetRichCurveConst()->Eval(X) / MaxVal;
-		Settings.TorqueCurve.AddNormalized(Y);
+		const float RPM = static_cast<float>(MaxRPM) * Sample / NumSamples;
+		Settings.TorqueCurve.AddNormalized(FMath::IsNearlyZero(MaxVal) ? 0.0f : Curve->Eval(RPM) / MaxVal);
 	}
 
 	Settings.MaxRPM = MaxRPM;
